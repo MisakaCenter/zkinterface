@@ -4,3 +4,4 @@ pub mod gadget_caller;
 pub mod workspace;
 
 pub mod circuit_generator;
+pub mod coda;

@@ -1,7 +1,7 @@
 extern crate serde;
 extern crate serde_json;
 
-use std::fs::{File, create_dir_all, remove_file};
+use std::fs::{File, create_dir_all, remove_file, read_dir};
 use std::io::{stdin, stdout, Read, Write, copy};
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
@@ -13,6 +13,7 @@ use crate::consumers::workspace::{list_workspace_files, has_zkif_extension};
 use crate::consumers::validator::Validator;
 use crate::consumers::simulator::Simulator;
 use crate::producers::circuit_generator::generate_sequence_metrics_data;
+use crate::producers::coda;
 
 const ABOUT: &str = "
 This is a collection of tools to work with zero-knowledge statements encoded in zkInterface messages.
@@ -101,6 +102,7 @@ pub struct Options {
 
 pub fn cli(options: &Options) -> Result<()> {
     match &options.tool[..] {
+        "coda" => main_coda(options),
         "example" => main_example(options),
         "cat" => main_cat(options),
         "to-json" => main_json(&load_messages(options)?),
@@ -191,6 +193,48 @@ fn main_example(opts: &Options) -> Result<()> {
 
         let path = out_dir.join("constraints.zkif");
         example_constraints().write_into(&mut File::create(&path)?)?;
+        eprintln!("Written {}", path.display());
+    }
+    Ok(())
+}
+
+// read coda json file and write zkif files
+fn main_coda(opts: &Options) -> Result<()> {
+    use crate::producers::coda::*;
+
+    if opts.paths.len() != 1 {
+        return Err("Specify a single directory where to write examples.".into());
+    }
+    let input_dir = &opts.paths[0];
+
+    if !input_dir.is_dir() {
+        return Err(format!("{} is not a directory", input_dir.display()).into());
+    }
+
+    // all subdirectories of input_dir are considered as workspaces
+    let mut input_files = vec![];
+    for entry in read_dir(input_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            main_coda(&Options {
+                tool: "coda".to_string(),
+                paths: vec![path],
+                field_order: opts.field_order.clone(),
+                instance_nbr: opts.instance_nbr,
+                witness_nbr: opts.witness_nbr,
+            })?;
+        } else
+        if path.is_file() && path.extension().unwrap() == "json" {
+            input_files.push(path);
+        }
+    }
+
+    // write zkif files
+
+    for input_path in input_files {
+        let path = input_path.with_extension("zkif");
+        generate_from_coda(input_path).write_into(&mut File::create(&path)?)?;
         eprintln!("Written {}", path.display());
     }
     Ok(())
